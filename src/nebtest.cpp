@@ -10,8 +10,8 @@ typedef double (*Func)(double arg);
 
 
 typedef struct BaseInfo_{
-	// int argdim; // dimension of argument
-	int* nexpvec; // vector of number of exponent
+	int* expvec;
+	int nexpvec; // vector of number of exponent
 	Func* fvec; // vector of Function
 }BaseInfo; // information of base function
 
@@ -27,8 +27,13 @@ typedef struct Model_{
 typedef struct NEBInfo_{
 	Model* m; // Information for Model Function
 
-	double* vec; // coordinate vector
+	double** images; // coordinate vector
+	int nimage; // number of images
 	int argdim;
+
+	double** tanmat; // matrix of tangent
+
+	int k; // spring constant
 
 	int p; // number of Images
 	double d; // difference step
@@ -52,7 +57,7 @@ double* InnerProduct(double* vec0, double* vec1, int n) {
 double BaseFunc(BaseInfo* b, double *vec) {
 	int i;
 	double val = 1;
-	for(int i = 0;i < b->argdim;i++) val *= pow(b->fvec[i](vec[i]),b->nexpvec[i]);
+	for(int i = 0;i < b->nexpvec;i++) val *= pow( b->fvec[i](vec[i]), b->expvec[i] );
 	return val;
 } //
 
@@ -60,22 +65,31 @@ double BaseFunc(BaseInfo* b, double *vec) {
 double ModelFunc(Model *m, double* vec) {
 	int i;
 	double val = 0;
-	for(i = 0;i < m->nbase;i++) { val += m->coeff[i] * BaseFunc(m->binfo[i],vec); }
+	// for(i = 0;i < m->nbase;i++) { val += m->coeff[i] * BaseFunc(m->binfo[i],vec); } // here
 	return val;
 } // Information for Model Potential
 
 
-double d_ModelFunc(Model* m, double* xvec, double* dxvec) {
-	int i;
-	double df, dx;
-	double* xxvec;
+double* d_ModelFunc(NEBInfo* neb, int num) {
+	int i,j;
+	double* df; double* dxvec; double* vec_plus_dxvec;
 
-	dx = 0; for(int i = 0;i < m->argdim;i++) dx += dxvec[i] * dxvec[i]; dx = sqrt(dx); // set dx
+	dxvec = (double*)malloc(sizeof(double) * neb->argdim);
+	vec_plus_dxvec = (double*)malloc(sizeof(double) * neb->argdim);
 
-	xxvec = (double*)malloc(sizeof(double) * m->argdim); // new xvec
-	for(i = 0;i < m->argdim;i++) { xxvec[i] = xvec[i] + dxvec[i]; }
-	df = ( ModelFunc(m,xxvec) - ModelFunc(m,xvec) ) / dx;
-	free(xxvec);
+	for(i = 0;i < neb->argdim;i++) { // for each df elems, ...
+		
+		for(j = 0;j < neb->argdim;j++) {
+			if(j == i) dxvec[j] = neb->d;
+			else dxvec[j] = 0;
+		}
+
+		for(j = 0;j < neb->argdim;j++) { vec_plus_dxvec[j] = neb->images[num][j] + dxvec[j]; }
+		df[i] = ( ModelFunc(neb->m,vec_plus_dxvec) - ModelFunc(neb->m,neb->images[num]) ) / (neb->d); // here
+	}
+	
+	free(vec_plus_dxvec);
+	free(dxvec);
 
 	return df;
 } // Partial differential
@@ -87,7 +101,15 @@ double Exptype(double r) { return 1 - exp(-0.5 * r);}
 void MakeIGuess(NEBInfo* neb) {}
 
 
-double* projection(double* vec, double* tvec) {
+double* Force_spring(NEBInfo* neb, int num) {
+	int i;
+	double* fvec;
+
+	return fvec;
+}
+
+
+double* projection(double* vec, double* t) {
 	double* vec_projection;
 
 
@@ -95,21 +117,28 @@ double* projection(double* vec, double* tvec) {
 }
 
 
-// void Force(NEBInfo* neb, double* fvec) {
-double* Force(NEBInfo* neb) {
+double** SetTanMat(NEBInfo* neb) {
+	double** tanmat;
+
+
+	return tanmat;
+}
+
+
+double* Force(NEBInfo* neb, int num) {
 	int i;
-	double** unit_tan_mat;
-	double* fvec;
+	double* Fvec;
+	double* Fs = Force_spring(neb,num); // malloc here
+	double* Fs_projection = projection(Fs,neb->tanmat[i]); // malloc here
+	double* dV = d_ModelFunc(neb,num); // malloc here
+	double* dV_projection = projection(dV,neb->tanmat[i]); // malloc here
 
-	fvec = (double*)malloc(sizeof(double) * neb->argdim);
+	Fvec = (double*)malloc(sizeof(double) * neb->argdim);
+	for(i = 0;i < neb->argdim;i++) { Fvec[i] = Fs_projection[i] - dV_projection[i]; }
 
-	for(i = 0;i < neb->argdim;i++) {
-		fvec[i] = 0;
-		fvec[i] += projection( Force_spring(), unit_tan_mat[i] ); // spring
-		fvec[i] -= d_ModelFunc() - projection( d_ModelFunc(), unit_tan_mat[i] );
-	}
-
-	fvec;
+	free(dV); free(dV_projection);
+	free(Fs); free(Fs_projection);
+	return Fvec;
 }
 
 /*
@@ -130,10 +159,13 @@ double d_Force(NEBInfo* neb, double* dxvec) {
 
 void Optimization_ModelFunc(NEBInfo* neb) {
 	int i, j, chk = 0;
-	double* dvec; // grad vector
-	double** dxmat; // vector of (dx vector)
-	dvec = (double*)malloc(sizeof(double) * neb->argdim); // vector of difference
-	dxmat = (double**)malloc(sizeof(double) * neb->argdim);
+	double* dvec = NULL; // grad vector
+	// double** dxmat; // vector of (dx vector)
+	
+	// dvec = (double*)malloc(sizeof(double) * neb->argdim); // vector of difference
+	// dxmat = (double**)malloc(sizeof(double) * neb->argdim);
+
+	/*
 	for(i = 0;i < neb->argdim;i++) {
 		dxmat[i] = (double*)malloc(sizeof(double) * neb->argdim);
 		for(j = 0;j < neb->argdim;j++) {
@@ -141,29 +173,24 @@ void Optimization_ModelFunc(NEBInfo* neb) {
 			else dxmat[i][j] = 0;
 		}
 	}
+	*/
 
 	while(chk == 0) {
-		chk = 1;
+		chk = 1; // check converged
+		neb->tanmat = SetTanMat(neb); // malloc here
+		for(i = 1;i < neb->nimage - 1;i++) { // for each images
+			// dvec = Force(neb,i); // get gradient / malloc here
+			for(j = 0;j < neb->argdim;j++) { if(dvec[j] > neb->threshold) chk = 0; }
+			if(chk == 1) break; // converged
+			for(j = 0;j < neb->argdim;j++) { neb->images[i][j] -= (neb->alpha) * dvec[j]; }
+			free(dvec);
+		} // update coordinate
+		free(neb->tanmat);
+	} // Optimization (steepest decent)
 
-		// Force(neb,dvec);
-		dvec = Force(neb);
-
-		/*
-		for(int i = 0;i < neb->argdim;i++) {
-			dvec[i] = d_Force(neb,dxmat[i]); // get gradient // here
-			if(dvec[i] > neb->threshold) chk = 0; // continue while all elems converged
-		} // differentiate & chk
-		*/
-
-		if(chk == 1) break; // converged
-
-		for(int i = 0;i < neb->argdim;i++) { neb->vec[i] -= (neb->alpha) * dvec[i]; } // update
-	} // Optimization
-
-	for(i = 0;i < neb->argdim;i++) free(dxmat[i]);
-	free(dxmat);
-	free(dvec);
-} // steepest decent
+	// for(i = 0;i < neb->argdim;i++) free(dxmat[i]);
+	// free(dxmat);
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -224,11 +251,13 @@ int main(int argc, char* argv[]) {
 	nebinfo->m->coeff = (double*)malloc(sizeof(double) * nbase);
 	nebinfo->m->binfo = (BaseInfo**)malloc(sizeof(BaseInfo*) * nbase);
 
-	for(i = 0;i < nbase;i++) { // for each base function, ...
-		nebinfo->m->binfo[i]->nexpvec = imat[i];
-		nebinfo->m->binfo[i]->fvec = (Func*)malloc(sizeof(Func) * argdim);
-		for(j = 0;j < argdim;j++) { nebinfo->m->binfo[i]->fvec[j] = Exptype; }
+	/*
+	for(i = 0;i < nebinfo->m->nbase;i++) { // for each base function, ...
+		nebinfo->m->binfo[i]->expvec = imat[i];
+		nebinfo->m->binfo[i]->fvec = (Func*)malloc(sizeof(Func) * nebinfo->m->nexpvec);
+		for(j = 0;j < nexpvec;j++) { nebinfo->m->binfo[i]->fvec[j] = Exptype; }
 	}
+	*/
 
 	// Memory Allocation END
 	
