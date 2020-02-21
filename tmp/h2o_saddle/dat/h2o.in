@@ -1,0 +1,9 @@
+nref	: 3
+rst	: 9
+natom	: 3
+npoint	: 25
+refs	: h2o.ref
+fit	: h2o.fit
+type	: exp type
+all	: h2o.all
+solver	: qr

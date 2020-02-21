@@ -107,6 +107,24 @@ double* d_ModelFunc(NEBInfo* neb, int num) {
 double Exptype(double r) { return 1 - exp(-0.5 * r);}
 
 
+void LoadIniStr(NEBInfo* neb, FILE* fp) {
+	int i, j, natom;
+	char buf[256], line[256];
+	
+	for(i = 0;i < 2;i++) {
+		fgets(line,256,fp);
+		sscanf(line,"%d",&natom);
+		fgets(line,256,fp);
+		for(j = 0;j < natom;j++) {
+			fgets(line,256,fp);
+			if(i == 0) sscanf(line,"%s%17lf%17lf%17lf",buf,&neb->images[0][0],&neb->images[0][1],&neb->images[0][2]);
+			else if(i == 1) sscanf(line,"%s%17lf%17lf%17lf",buf,&neb->images[neb->nimage - 1][0],&neb->images[neb->nimage - 1][1],&neb->images[neb->nimage - 1][2]);
+		}
+	}
+
+}
+
+
 void MakeIGuess(NEBInfo* neb) {
 	int i, j, k;
 
@@ -238,7 +256,12 @@ void Optimization_ModelFunc(NEBInfo* neb) {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-int Combination(int n, int k) { return 0; }
+int Combination(int n, int r) {
+	if(n == r) return 1;
+	else if(r == 0) return 1;
+	else if(r == 1) return n;
+	else return Combination(n - 1, r- 1) + Combination(n - 1, r);
+}
 
 
 int** MakeCombination(int vecsize, int condition) {
@@ -278,14 +301,15 @@ int** MakeCombination(int vecsize, int condition) {
 
 int main(int argc, char* argv[]) {
 	int i,j,k;
-	const int natom = 3, nimage = 10;
-	const int argdim = natom * 3;
-
-	int condition = 8, nbase = Combination(argdim + condition,condition), nimage = 10;
-	int** imat = MakeCombination(argdim,condition);
+	const int natom = 3, nimage = 10, condition = 8;
+	const int argdim = natom * 3, npair = natom * (natom - 1);
+	const int nbase = Combination(npair + condition,condition);
+	int** imat = MakeCombination(npair,condition);
 	NEBInfo* nebinfo;
+	FILE *fp_xyz, *fp;
+	char xyz[256]; 
 
-
+	// Memory Allocation
 
 	nebinfo = (NEBInfo*)malloc(sizeof(NEBInfo));
 	nebinfo->images = (double**)malloc(sizeof(double*) * nimage);
@@ -293,21 +317,35 @@ int main(int argc, char* argv[]) {
 	nebinfo->tanmat = (double**)malloc(sizeof(double*) * nimage);
 	for(i = 0;i < nimage;i++) { nebinfo->images[i] = (double*)malloc(sizeof(double) * argdim); }
 
+	nebinfo->nimage = nimage;
+	nebinfo->argdim = argdim;
+	nebinfo->k = 1.0;
+	nebinfo->d = 0.0001;
+	nebinfo->threshold = 0.0001;
+	nebinfo->alpha = 0.1;
+
 	nebinfo->m = (Model*)malloc(sizeof(Model));
 	nebinfo->m->nbase = nbase;
 	nebinfo->m->coeff = (double*)malloc(sizeof(double) * nbase);
 	nebinfo->m->binfo = (BaseInfo**)malloc(sizeof(BaseInfo*) * nbase);
 
+	nebinfo->m->nbase = nbase;
+
 	for(i = 0;i < nbase;i++) { // for each base function, ...
 		nebinfo->m->binfo[i]->expvec = imat[i];
-		nebinfo->m->binfo[i]->fvec = (Func*)malloc(sizeof(Func) * nebinfo->m->nexpvec);
-		for(j = 0;j < nexpvec;j++) { nebinfo->m->binfo[i]->fvec[j] = Exptype; }
+		nebinfo->m->binfo[i]->fvec = (Func*)malloc(sizeof(Func) * npair);
+		for(j = 0;j < npair;j++) { nebinfo->m->binfo[i]->fvec[j] = Exptype; }
 	}
 
 	// Memory Allocation END
 	
 
 	// Start NEB process
+
+	sprintf(xyz,"h2o.ini");
+	fp_xyz = fopen(xyz,"r");
+	LoadIniStr(nebinfo,fp_xyz);
+	fclose(fp_xyz);
 
 	MakeIGuess(nebinfo); // here
 
@@ -316,17 +354,18 @@ int main(int argc, char* argv[]) {
 	// End NEB process
 
 
+	fp = fopen(xyz,"w");
+
 	// Free Memory
 
-	for(i = 0;i < nbase;i++) free(nebinfo->m->binfo[i]->fvec);
 
+	for(i = 0;i < nbase;i++) free(nebinfo->m->binfo[i]->fvec);
 	free(nebinfo->m->binfo);
 	free(nebinfo->m->coeff);
 	free(nebinfo->m);
 
-	for(i = 0;i < nbase;i++) free(imat[i]);
-	free(imat);
-
+	for(i = 0;i < nimage;i++) { free(nebinfo->tanmat[i]); } free(nebinfo->tanmat);
+	for(i = 0;i < nimage;i++) { free(nebinfo->images[i]); } free(nebinfo->images);
 	free(nebinfo);
 
 	// Free Memory END
