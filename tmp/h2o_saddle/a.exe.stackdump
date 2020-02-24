@@ -1,0 +1,8 @@
+Exception: STATUS_ACCESS_VIOLATION at eip=61131F57
+eax=203C69E8 ebx=9D916150 ecx=0BC1C000 edx=C22E69E0 esi=5FBFCB30 edi=00000002
+ebp=20360000 esp=0063C410 program=C:\Users\user\DOCUME~1\MOBAXT~1\home\NEB\src\a.exe, pid 2448, thread main
+cs=0023 ds=002B es=002B fs=0053 gs=002B ss=002B
+Stack trace:
+Frame     Function  Args
+20360000  61131F57 (7665642F, 00000300, 00000006, 00000004)
+End of stack trace
