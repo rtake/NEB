@@ -1,0 +1,9 @@
+nref	: 54
+rst	: 8
+natom	: 4
+npoint	: 54
+refs	: hcoh_54point.ref
+fit	: hcoh_exp8th_qr_54point.fit
+type	: exp type
+all	: hcoh.all
+solver	: qr
