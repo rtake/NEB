@@ -4,4 +4,8 @@ neb	: hcoh_NEB.log.xyz
 nimage	: 10
 natom	: 4
 order	: 8
-
+sconst	: 0.01
+ssize	: 0.001
+thold	: 0.001
+alpha	: 0.001
+cycle	: 100000
