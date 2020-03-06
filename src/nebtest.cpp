@@ -30,11 +30,16 @@ typedef struct NEBInfo_{
 
 	double** images; // coordinate vector
 	int nimage; // number of images
+	int natom;
+	int order;
 	int argdim;
+	int npair;
+	int nbase;
 
 	char** elms;
 
 	double** tanmat; // matrix of tangent
+	int **imat;
 
 	int k; // spring constant
 	double d; // difference step
@@ -42,6 +47,9 @@ typedef struct NEBInfo_{
 	double alpha;
 
 	char name[256];
+	char log[256];
+	char pes[256];
+	char xyz[256]; // initial structure
 }NEBInfo;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -138,10 +146,7 @@ void LoadIniStr(NEBInfo* neb, FILE* fp) {
 		}
 	}
 
-	// for(i = 0;i < natom;i++) printf("%17lf%17lf%17lf\n", neb->images[0][3*i], neb->images[0][3*i + 1],neb->images[0][3*i + 2]);
-	// for(i = 0;i < natom;i++) printf("%17lf%17lf%17lf\n", neb->images[neb->nimage - 1][3*i], neb->images[neb->nimage - 1][3*i + 1],neb->images[neb->nimage - 1][3*i + 2]);
-
-}
+} // load initial structures ( first, end )
 
 
 void MakeIGuess(NEBInfo* neb) {
@@ -259,8 +264,6 @@ void Optimization_ModelFunc(NEBInfo* neb) {
 	FILE *fp;
 	char fname[256], name[256];
 
-	sprintf(name, "h2o");
-
 	dmat = (double**)malloc(sizeof(double*) * neb->nimage);
 	for(i = 0;i < neb->nimage;i++) dmat[i] = (double*)malloc(sizeof(double) * neb->argdim);
 
@@ -290,7 +293,7 @@ void Optimization_ModelFunc(NEBInfo* neb) {
 		} // update coordinate
 
 		if(cycle %10 == 0) {
-			sprintf(fname,"%s_cycle%d.neb.xyz",name, cycle);
+			sprintf(fname,"%s_NEB_cycle%d.neb.xyz", neb->name, cycle);
 			fp = fopen(fname,"w");
 			for(i = 0;i < neb->nimage;i++) {
 				fprintf(fp,"%d\n%d\n",neb->argdim / 3, i);
@@ -355,84 +358,100 @@ int** MakeCombination(int vecsize, int condition) { // printf("vecsize %d, condi
 	return imat;
 }
 
+
+void LoadInfile(NEBInfo* neb) {
+	FILE *fp;
+	char line[256], *pt, infname[256];
+
+	fp = fopen( infname, "r" );
+	while( fgets( line, 256, fp ) ) {
+		pt = strstr( line, ":" );
+		if( strstr( line, "pes") ) sscanf( pt + 2, "%s", neb->pes );
+		else if( strstr( line, "ini") ) sscanf( pt + 2, "%s", neb->xyz );
+		else if( strstr( line, "log") ) sscanf( pt + 2, "%s", neb->log );
+		else if( strstr( line, "image") ) sscanf( pt + 2, "%d", &neb->nimage );
+		else if( strstr( line, "atom") ) sscanf( pt + 2, "%s", &neb->natom );
+		else if( strstr( line, "order") ) sscanf( pt + 2, "%s", &neb->order );
+	}
+	fclose( fp );
+
+	neb->argdim = neb->natom * 3;
+	neb->npair = neb->natom * ( neb->natom - 1 ) / 2;
+	neb->nbase = Combination( neb->npair + neb->order, neb->order );
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char* argv[]) {
 	int i,j,k;
-	const int natom = 3, nimage = 10, condition = 8;
-	const int argdim = natom * 3, npair = natom * (natom - 1) / 2; 
-	const int nbase = Combination(npair + condition,condition); // number of basis set
-	int** imat = MakeCombination(npair,condition);
+	char infname[256], fname[256], xyz[256], neb[256], line[256], pes[256], *pt;
+	FILE *fp_xyz, *fp_neb, *fp_pes, *fp_in;
 	NEBInfo* nebinfo;
-	FILE *fp_xyz, *fp_neb, *fp_pes;
-	char xyz[256], neb[256], line[256], pes[256], *pt; 
 
-	// Memory Allocation
+	nebinfo = (NEBInfo*)malloc( sizeof(NEBInfo) ); // resore calc. info.
 
-	nebinfo = (NEBInfo*)malloc(sizeof(NEBInfo));
-	nebinfo->images = (double**)malloc(sizeof(double*) * nimage);
-	for(i = 0;i < nimage;i++) { nebinfo->images[i] = (double*)malloc(sizeof(double) * argdim); }
-	nebinfo->tanmat = (double**)malloc(sizeof(double*) * nimage);
-	for(i = 0;i < nimage;i++) { nebinfo->tanmat[i] = (double*)malloc(sizeof(double) * argdim); }
+	sprintf( nebinfo->name, "%s", argv[1] );
+	LoadInfile( nebinfo );
 
-	nebinfo->elms = (char**)malloc(sizeof(char*) * natom);
-	for(i = 0;i < natom;i++) { nebinfo->elms[i] = (char*)malloc(sizeof(char) * 10); }
-
-	nebinfo->nimage = nimage;
-	nebinfo->argdim = argdim;
+	nebinfo->imat = MakeCombination( nebinfo->npair, nebinfo->order );
 	nebinfo->k = 1.0;
 	nebinfo->d = 0.0001;
 	nebinfo->threshold = 0.0001;
 	nebinfo->alpha = 0.1;
 
-	nebinfo->m = (Model*)malloc(sizeof(Model));
-	nebinfo->m->nbase = nbase;
-	nebinfo->m->coeff = (double*)malloc(sizeof(double) * nbase);
-	nebinfo->m->binfo = (BaseInfo**)malloc(sizeof(BaseInfo*) * nbase);
+	// Memory Allocation
 
-	for(i = 0;i < nbase;i++) { // for each base function, ...
+	nebinfo->images = (double**)malloc( sizeof(double*) * nebinfo->nimage );
+	for(i = 0;i < nebinfo->nimage;i++) { nebinfo->images[i] = (double*)malloc(sizeof(double) * nebinfo->argdim); }
+	nebinfo->tanmat = (double**)malloc(sizeof(double*) * nebinfo->nimage);
+	for(i = 0;i < nebinfo->nimage;i++) { nebinfo->tanmat[i] = (double*)malloc(sizeof(double) * nebinfo->argdim); }
+
+	nebinfo->elms = (char**)malloc(sizeof(char*) * nebinfo->natom);
+	for(i = 0;i < nebinfo->natom;i++) { nebinfo->elms[i] = (char*)malloc(sizeof(char) * 10); }
+
+	nebinfo->m = (Model*)malloc(sizeof(Model));
+	nebinfo->m->coeff = (double*)malloc(sizeof(double) * nebinfo->nbase);
+	nebinfo->m->binfo = (BaseInfo**)malloc(sizeof(BaseInfo*) * nebinfo->nbase);
+
+	for(i = 0;i < nebinfo->nbase;i++) { // for each base function, ...
 		nebinfo->m->binfo[i] = (BaseInfo*)malloc(sizeof(BaseInfo));
-		nebinfo->m->binfo[i]->expvec = imat[i];
-		nebinfo->m->binfo[i]->npair = npair;
-		nebinfo->m->binfo[i]->fvec = (Func*)malloc(sizeof(Func) * npair);
-		for(j = 0;j < npair;j++) { nebinfo->m->binfo[i]->fvec[j] = Exptype; }
+		nebinfo->m->binfo[i]->expvec = nebinfo->imat[i];
+		nebinfo->m->binfo[i]->npair = nebinfo->npair;
+		nebinfo->m->binfo[i]->fvec = (Func*)malloc(sizeof(Func) * nebinfo->npair);
+		for(j = 0;j < nebinfo->npair;j++) { nebinfo->m->binfo[i]->fvec[j] = Exptype; }
 	}
 
 	// Memory Allocation END
 
 	// Start NEB process
 
-	sprintf(xyz,"h2o.ini.xyz");
-	fp_xyz = fopen(xyz,"r");
-	LoadIniStr(nebinfo,fp_xyz);
-	fclose(fp_xyz);
+	LoadIniStr( nebinfo );
 
-	sprintf(pes,"h2o.pes");
-	fp_pes = fopen(pes, "r");
-	for(i = 0;i < nbase;i++) {
-		fgets(line,256,fp_pes);
-		pt = strstr(line,":");
-		if(pt == NULL) printf("Number of Coeffs not mathced, stop\n");
-		else sscanf(pt + 2,"%lf", &nebinfo->m->coeff[i]);
-		// printf("Coeff[%d] : %lf\n",i, nebinfo->m->coeff[i]);
+	LoadPES( nebinfo );
+
+	/*
+	fp_pes = fopen( pes, "r" );
+	for(i = 0;i < nebinfo->nbase;i++) {
+		fgets( line, 256, fp_pes );
+		sscanf( line, "%lf", &nebinfo->m->coeff[i] );
 	}
 	fclose(fp_pes);
+	*/
 
-	MakeIGuess(nebinfo); // ok
+	MakeIGuess( nebinfo ); // ok
 
-	Optimization_ModelFunc(nebinfo); // here
+	Optimization_ModelFunc( nebinfo ); // here
 
 	// End NEB process
 
 	// FILE Out 
 
-	sprintf(neb, "h2o.neb.xyz");
 	fp_neb = fopen(neb,"w");
-	for(i = 0;i < nimage;i++) {
-		fprintf(fp_neb,"%d\n%d\n",natom, i);
-		for(j = 0;j < natom;j++) {
+	for(i = 0;i < nebinfo->nimage;i++) {
+		fprintf(fp_neb,"%d\n%d\n", nebinfo->natom, i);
+		for(j = 0;j < nebinfo->natom;j++) {
 			fprintf(fp_neb,"%s\t%17lf\t%17lf\t%17lf\n", nebinfo->elms[j], nebinfo->images[i][3*j], nebinfo->images[i][3*j + 1], nebinfo->images[i][3*j + 2]);
 		}
 	}
@@ -442,14 +461,16 @@ int main(int argc, char* argv[]) {
 
 	// Free Memory
 
-	for(i = 0;i < nbase;i++) free(nebinfo->m->binfo[i]->fvec);
+	for(i = 0;i < nebinfo->nbase;i++) free(nebinfo->m->binfo[i]->fvec);
 	free(nebinfo->m->binfo);
 	free(nebinfo->m->coeff);
 	free(nebinfo->m);
 
-	for(i = 0;i < natom;i++) { free(nebinfo->elms[i]); } free(nebinfo->elms);
-	for(i = 0;i < nimage;i++) { free(nebinfo->tanmat[i]); } free(nebinfo->tanmat);
-	for(i = 0;i < nimage;i++) { free(nebinfo->images[i]); } free(nebinfo->images);
+	for(i = 0;i < nebinfo->natom;i++) { free(nebinfo->elms[i]); } free(nebinfo->elms);
+	for(i = 0;i < nebinfo->nimage;i++) { free(nebinfo->tanmat[i]); } free(nebinfo->tanmat);
+	for(i = 0;i < nebinfo->nimage;i++) { free(nebinfo->images[i]); } free(nebinfo->images);
+
+	free( nebinfo->imat );
 	free(nebinfo);
 
 	// Free Memory END

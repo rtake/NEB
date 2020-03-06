@@ -1,0 +1,7 @@
+pes	: hcoh.pes
+xyz	: hcoh_NEB.ini.xyz
+neb	: hcoh_NEB.log.xyz
+nimage	: 10
+natom	: 4
+order	: 8
+
